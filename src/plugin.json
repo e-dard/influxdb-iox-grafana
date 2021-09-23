@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/master/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "influxdb-iox-grafana",
+  "id": "influxdata-influxdb-iox-grafana",
+  "metrics": true,
+  "backend": true,
+  "executable": "gpx_influxdb-iox-grafana",
+  "info": {
+    "description": "Query an InfluxDB IOx instance via its SQL frontend",
+    "author": {
+      "name": "Edd Robinson",
+      "url": "https://www.influxdata.com/"
+    },
+    "keywords": [
+      "iox",
+      "influxdb",
+      "sql",
+      "influxdata",
+      "arrow",
+      "parquet",
+      "columnar"
+    ],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [
+      {
+        "name": "Website",
+        "url": "https://github.com/grafana/grafana-starter-datasource-backend"
+      },
+      {
+        "name": "License",
+        "url": "https://github.com/grafana/grafana-starter-datasource-backend/blob/master/LICENSE"
+      }
+    ],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=7.0.0",
+    "plugins": []
+  }
+}
