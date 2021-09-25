@@ -3,44 +3,57 @@ package plugin
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
+	"errors"
+	"fmt"
+	"net/url"
 	"time"
 
+	pb "github.com/e-dard/influxdb-iox-grafana/pkg/iox/github.com/influxdata/iox/management/v1"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
-// Make sure SampleDatasource implements required interfaces. This is important to do
-// since otherwise we will only get a not implemented error response from plugin in
-// runtime. In this example datasource instance implements backend.QueryDataHandler,
-// backend.CheckHealthHandler, backend.StreamHandler interfaces. Plugin should not
-// implement all these interfaces - only those which are required for a particular task.
-// For example if plugin does not need streaming functionality then you are free to remove
-// methods that implement backend.StreamHandler. Implementing instancemgmt.InstanceDisposer
-// is useful to clean up resources used by previous datasource instance when a new datasource
-// instance created upon datasource settings changed.
 var (
-	_ backend.QueryDataHandler      = (*SampleDatasource)(nil)
-	_ backend.CheckHealthHandler    = (*SampleDatasource)(nil)
-	_ backend.StreamHandler         = (*SampleDatasource)(nil)
-	_ instancemgmt.InstanceDisposer = (*SampleDatasource)(nil)
+	_ backend.QueryDataHandler      = (*IOxDatasource)(nil)
+	_ backend.CheckHealthHandler    = (*IOxDatasource)(nil)
+	_ backend.StreamHandler         = (*IOxDatasource)(nil)
+	_ instancemgmt.InstanceDisposer = (*IOxDatasource)(nil)
 )
 
-// NewSampleDatasource creates a new datasource instance.
-func NewSampleDatasource(_ backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
-	return &SampleDatasource{}, nil
+type datasourceModel struct {
+	Host     string `json:"host"`
+	Database string `json:"database"`
 }
 
-// SampleDatasource is an example datasource which can respond to data queries, reports
-// its health and has streaming skills.
-type SampleDatasource struct{}
+// IOxDatasource can respond to queries and describe its health.
+type IOxDatasource struct {
+	Host     string
+	Database string
+
+	client pb.ManagementServiceClient
+	err    error // error, if any, returned when initialising client
+}
+
+// NewIOxDatasource creates a new datasource instance.
+func NewIOxDatasource(s backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
+	var dm datasourceModel
+	if err := json.Unmarshal(s.JSONData, &dm); err != nil {
+		return nil, err
+	}
+
+	ds := &IOxDatasource{Host: dm.Host, Database: dm.Database}
+	ds.err = ds.connect() // initialise underlying connection to IOx
+	return ds, nil
+}
 
 // Dispose here tells plugin SDK that plugin wants to clean up resources when a new instance
 // created. As soon as datasource settings change detected by SDK old datasource instance will
-// be disposed and a new one will be created using NewSampleDatasource factory function.
-func (d *SampleDatasource) Dispose() {
+// be disposed and a new one will be created using NewIOxDatasource factory function.
+func (d *IOxDatasource) Dispose() {
 	// Clean up datasource instance resources.
 }
 
@@ -48,7 +61,7 @@ func (d *SampleDatasource) Dispose() {
 // req contains the queries []DataQuery (where each query contains RefID as a unique identifier).
 // The QueryDataResponse contains a map of RefID to the response for each query, and each response
 // contains Frames ([]*Frame).
-func (d *SampleDatasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
+func (d *IOxDatasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	log.DefaultLogger.Info("QueryData called", "request", req)
 
 	// create response struct
@@ -70,7 +83,7 @@ type queryModel struct {
 	QueryText string `json:"queryText"`
 }
 
-func (d *SampleDatasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
+func (d *IOxDatasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	response := backend.DataResponse{}
 
 	// Unmarshal the JSON into our queryModel.
@@ -80,6 +93,8 @@ func (d *SampleDatasource) query(_ context.Context, pCtx backend.PluginContext, 
 	if response.Error != nil {
 		return response
 	}
+
+	log.DefaultLogger.Info("HELLO THERE", "QUERY", qm.QueryText, "CLIENT", d.client, "ERROR", d.err)
 
 	// create data frame response.
 	frame := data.NewFrame("response")
@@ -96,82 +111,89 @@ func (d *SampleDatasource) query(_ context.Context, pCtx backend.PluginContext, 
 	return response
 }
 
-// CheckHealth handles health checks sent from Grafana to the plugin.
-// The main use case for these health checks is the test button on the
-// datasource configuration page which allows users to verify that
-// a datasource is working as expected.
-func (d *SampleDatasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
-	log.DefaultLogger.Info("CheckHealth called", "request", req)
+// simplify a gRPC error to the underlying message, or return the provided error
+// if the error didn't originate from gRPC.
+func gRPCMsgFromErr(err error) error {
+	s, ok := status.FromError(err)
+	if ok {
+		return errors.New(s.Message())
+	}
+	return err
+}
 
-	var status = backend.HealthStatusOk
-	var message = "Data source is working"
+func (d *IOxDatasource) connect() error {
+	// Validate URL
+	url, err := url.Parse(d.Host)
+	if err != nil {
+		return err
+	}
 
-	if rand.Int()%2 == 0 {
-		status = backend.HealthStatusError
-		message = "randomized error"
+	log.DefaultLogger.Info("Dialling", "host", url.Host)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	// TODO(edd): figure out correct options
+	conn, err := grpc.DialContext(ctx, url.Host, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.DefaultLogger.Info("Connection error", "err", err)
+		return err
+	}
+
+	d.client = pb.NewManagementServiceClient(conn)
+	return nil
+}
+
+// CheckHealth handles health checks sent from Grafana to the IOx backend.
+// Health is checked by dialling a connection using the set host and ensuring
+// that the specified database exists.
+func (d *IOxDatasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
+	log.DefaultLogger.Debug("CheckHealth called", "request", req)
+
+	if d.err != nil { // underlying connection error
+		err := gRPCMsgFromErr(d.err)
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: fmt.Sprintf("Connection failed: %v", err),
+		}, nil
+	}
+
+	in := pb.GetDatabaseRequest{Name: d.Database, OmitDefaults: true}
+	if _, err := d.client.GetDatabase(context.Background(), &in); err != nil {
+		log.DefaultLogger.Info("Unable to connect", "database", d.Database, "host", d.Host, "error", err)
+
+		err = gRPCMsgFromErr(err)
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: fmt.Sprintf("Connection failed: %v", err),
+		}, nil
 	}
 
 	return &backend.CheckHealthResult{
-		Status:  status,
-		Message: message,
+		Status:  backend.HealthStatusOk,
+		Message: "Data source is working",
 	}, nil
 }
 
 // SubscribeStream is called when a client wants to connect to a stream. This callback
 // allows sending the first message.
-func (d *SampleDatasource) SubscribeStream(_ context.Context, req *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
+func (d *IOxDatasource) SubscribeStream(_ context.Context, req *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
 	log.DefaultLogger.Info("SubscribeStream called", "request", req)
 
-	status := backend.SubscribeStreamStatusPermissionDenied
-	if req.Path == "stream" {
-		// Allow subscribing only on expected path.
-		status = backend.SubscribeStreamStatusOK
-	}
 	return &backend.SubscribeStreamResponse{
-		Status: status,
+		Status: backend.SubscribeStreamStatusPermissionDenied,
 	}, nil
 }
 
 // RunStream is called once for any open channel.  Results are shared with everyone
 // subscribed to the same channel.
-func (d *SampleDatasource) RunStream(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
+func (d *IOxDatasource) RunStream(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 	log.DefaultLogger.Info("RunStream called", "request", req)
 
-	// Create the same data frame as for query data.
-	frame := data.NewFrame("response")
-
-	// Add fields (matching the same schema used in QueryData).
-	frame.Fields = append(frame.Fields,
-		data.NewField("time", nil, make([]time.Time, 1)),
-		data.NewField("values", nil, make([]int64, 1)),
-	)
-
-	counter := 0
-
-	// Stream data frames periodically till stream closed by Grafana.
-	for {
-		select {
-		case <-ctx.Done():
-			log.DefaultLogger.Info("Context done, finish streaming", "path", req.Path)
-			return nil
-		case <-time.After(time.Second):
-			// Send new data periodically.
-			frame.Fields[0].Set(0, time.Now())
-			frame.Fields[1].Set(0, int64(10*(counter%2+1)))
-
-			counter++
-
-			err := sender.SendFrame(frame, data.IncludeAll)
-			if err != nil {
-				log.DefaultLogger.Error("Error sending frame", "error", err)
-				continue
-			}
-		}
-	}
+	return nil
 }
 
 // PublishStream is called when a client sends a message to the stream.
-func (d *SampleDatasource) PublishStream(_ context.Context, req *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
+func (d *IOxDatasource) PublishStream(_ context.Context, req *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
 	log.DefaultLogger.Info("PublishStream called", "request", req)
 
 	// Do not allow publishing at all.
