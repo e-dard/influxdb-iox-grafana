@@ -1,7 +1,7 @@
 import { DataSourceInstanceSettings } from '@grafana/data';
-import { DataSourceWithBackend } from '@grafana/runtime';
+import { DataSourceWithBackend, getTemplateSrv } from '@grafana/runtime';
 import { MyDataSourceOptions, MyQuery } from './types';
-import { getTemplateSrv } from '@grafana/runtime';
+// import { getTemplateSrv } from '@grafana/runtime';
 
 export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptions> {
   constructor(instanceSettings: DataSourceInstanceSettings<MyDataSourceOptions>) {

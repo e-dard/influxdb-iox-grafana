@@ -1,10 +1,12 @@
 # github.com/apache/arrow/go/arrow v0.0.0-20210223225224-5bea62493d91
+## explicit
 github.com/apache/arrow/go/arrow
 github.com/apache/arrow/go/arrow/array
 github.com/apache/arrow/go/arrow/arrio
 github.com/apache/arrow/go/arrow/bitutil
 github.com/apache/arrow/go/arrow/decimal128
 github.com/apache/arrow/go/arrow/endian
+github.com/apache/arrow/go/arrow/flight
 github.com/apache/arrow/go/arrow/float16
 github.com/apache/arrow/go/arrow/internal/cpu
 github.com/apache/arrow/go/arrow/internal/debug
@@ -49,6 +51,10 @@ github.com/grafana/grafana-plugin-sdk-go/genproto/pluginv2
 github.com/grafana/grafana-plugin-sdk-go/internal
 github.com/grafana/grafana-plugin-sdk-go/internal/automanagement
 github.com/grafana/grafana-plugin-sdk-go/internal/standalone
+github.com/grafana/grafana-plugin-sdk-go/live
+# github.com/grafana/grafana-starter-datasource-backend v0.0.0-20210820074628-c40d1723f2f5
+## explicit
+github.com/grafana/grafana-starter-datasource-backend/pkg/plugin
 # github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 github.com/grpc-ecosystem/go-grpc-middleware
 # github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0

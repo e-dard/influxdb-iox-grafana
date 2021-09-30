@@ -12,7 +12,6 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
-	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
@@ -34,8 +33,9 @@ type IOxDatasource struct {
 	Host     string
 	Database string
 
-	client pb.ManagementServiceClient
-	err    error // error, if any, returned when initialising client
+	mgt_client   pb.ManagementServiceClient
+	query_client *FlightClient
+	err          error // error, if any, returned when initialising client(s)
 }
 
 // NewIOxDatasource creates a new datasource instance.
@@ -62,7 +62,7 @@ func (d *IOxDatasource) Dispose() {
 // The QueryDataResponse contains a map of RefID to the response for each query, and each response
 // contains Frames ([]*Frame).
 func (d *IOxDatasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
-	log.DefaultLogger.Info("QueryData called", "request", req)
+	log.DefaultLogger.Debug("QueryData called", "request", req)
 
 	// create response struct
 	response := backend.NewQueryDataResponse()
@@ -83,7 +83,7 @@ type queryModel struct {
 	QueryText string `json:"queryText"`
 }
 
-func (d *IOxDatasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
+func (d *IOxDatasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	response := backend.DataResponse{}
 
 	// Unmarshal the JSON into our queryModel.
@@ -91,23 +91,12 @@ func (d *IOxDatasource) query(_ context.Context, pCtx backend.PluginContext, que
 
 	response.Error = json.Unmarshal(query.JSON, &qm)
 	if response.Error != nil {
+		log.DefaultLogger.Error("unmarshal query failure", "query", string(query.JSON), "error", response.Error)
 		return response
 	}
+	log.DefaultLogger.Debug("query called", "query", qm.QueryText)
 
-	log.DefaultLogger.Info("HELLO THERE", "QUERY", qm.QueryText, "CLIENT", d.client, "ERROR", d.err)
-
-	// create data frame response.
-	frame := data.NewFrame("response")
-
-	// add fields.
-	frame.Fields = append(frame.Fields,
-		data.NewField("time", nil, []time.Time{query.TimeRange.From, query.TimeRange.To}),
-		data.NewField("values", nil, []int64{10, 20}),
-	)
-
-	// add the frames to the response.
-	response.Frames = append(response.Frames, frame)
-
+	response.Frames, response.Error = d.query_client.query(ctx, d.Database, qm.QueryText)
 	return response
 }
 
@@ -128,18 +117,24 @@ func (d *IOxDatasource) connect() error {
 		return err
 	}
 
-	log.DefaultLogger.Info("Dialling", "host", url.Host)
+	log.DefaultLogger.Debug("Dialling", "host", url.Host)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
 	// TODO(edd): figure out correct options
 	conn, err := grpc.DialContext(ctx, url.Host, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.DefaultLogger.Info("Connection error", "err", err)
+		log.DefaultLogger.Error("Connection error", "err", err)
 		return err
 	}
+	d.mgt_client = pb.NewManagementServiceClient(conn)
 
-	d.client = pb.NewManagementServiceClient(conn)
+	// Initialise a Flight client
+	query_client, err := NewFlightClient(url.Host)
+	if err != nil {
+		return err
+	}
+	d.query_client = query_client
 	return nil
 }
 
@@ -158,8 +153,8 @@ func (d *IOxDatasource) CheckHealth(ctx context.Context, req *backend.CheckHealt
 	}
 
 	in := pb.GetDatabaseRequest{Name: d.Database, OmitDefaults: true}
-	if _, err := d.client.GetDatabase(context.Background(), &in); err != nil {
-		log.DefaultLogger.Info("Unable to connect", "database", d.Database, "host", d.Host, "error", err)
+	if _, err := d.mgt_client.GetDatabase(context.Background(), &in); err != nil {
+		log.DefaultLogger.Error("Unable to connect", "database", d.Database, "host", d.Host, "error", err)
 
 		err = gRPCMsgFromErr(err)
 		return &backend.CheckHealthResult{
@@ -177,7 +172,7 @@ func (d *IOxDatasource) CheckHealth(ctx context.Context, req *backend.CheckHealt
 // SubscribeStream is called when a client wants to connect to a stream. This callback
 // allows sending the first message.
 func (d *IOxDatasource) SubscribeStream(_ context.Context, req *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
-	log.DefaultLogger.Info("SubscribeStream called", "request", req)
+	log.DefaultLogger.Debug("SubscribeStream called", "request", req)
 
 	return &backend.SubscribeStreamResponse{
 		Status: backend.SubscribeStreamStatusPermissionDenied,
@@ -187,14 +182,14 @@ func (d *IOxDatasource) SubscribeStream(_ context.Context, req *backend.Subscrib
 // RunStream is called once for any open channel.  Results are shared with everyone
 // subscribed to the same channel.
 func (d *IOxDatasource) RunStream(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
-	log.DefaultLogger.Info("RunStream called", "request", req)
+	log.DefaultLogger.Debug("RunStream called", "request", req)
 
 	return nil
 }
 
 // PublishStream is called when a client sends a message to the stream.
 func (d *IOxDatasource) PublishStream(_ context.Context, req *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
-	log.DefaultLogger.Info("PublishStream called", "request", req)
+	log.DefaultLogger.Debug("PublishStream called", "request", req)
 
 	// Do not allow publishing at all.
 	return &backend.PublishStreamResponse{
