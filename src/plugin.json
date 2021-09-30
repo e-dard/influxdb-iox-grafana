@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/master/docs/sources/developers/plugins/plugin.schema.json",
   "type": "datasource",
-  "name": "influxdb-iox-grafana",
+  "name": "InfluxDB IOx",
   "id": "influxdata-influxdb-iox-grafana",
   "metrics": true,
   "backend": true,
