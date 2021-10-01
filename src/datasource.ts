@@ -14,6 +14,7 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
     };
   }
 
+  // this is basically taken verbatim from the Grafana CSV plugin example.
   async metricFindQuery(query: MyQuery, options?: any) {
     const request = {
       targets: [
@@ -26,7 +27,7 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
       rangeRaw: options.rangeRaw,
     } as DataQueryRequest<MyQuery>;
 
-    let res: DataQueryResponse;
+    let res: DataQueryResponse | undefined;
 
     try {
       res = await this.query(request).toPromise();
@@ -34,7 +35,7 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
       return Promise.reject(err);
     }
 
-    console.log(res.data);
+    res = res!;
     if (!res.data.length || !res.data[0].fields.length) {
       return [];
     }

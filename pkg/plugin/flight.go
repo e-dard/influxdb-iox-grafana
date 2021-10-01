@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/apache/arrow/go/arrow"
 	"github.com/apache/arrow/go/arrow/flight"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
@@ -59,11 +60,36 @@ func (c *FlightClient) query(ctx context.Context, database string, query string)
 		defer rb.Release()
 		log.DefaultLogger.Debug("Record Batch contents", "columns", fmt.Sprintf("%v", rb.Columns()))
 
+		// TODO(edd):
+		//
+		// Figure out how to determine whether to emit long or wide data format.
+		//
+		// I expected to be able to handle this on the front-end via
+		// transformations but it doesn't seem to be working for me.
+		hasTimeColumn := false
+		hasLabelColumn := false
+		for _, field := range rb.Schema().Fields() {
+			if field.Name == "time" && field.Type.ID() != arrow.STRING {
+				hasTimeColumn = true
+			} else if field.Type.ID() == arrow.STRING {
+				hasLabelColumn = true
+			}
+		}
+
 		frame, err := data.FromArrowRecord(rb)
 		if err != nil {
 			log.DefaultLogger.Error("Unable to convert RB to Frame", "error", err)
 			return nil, err
 		}
+
+		if hasLabelColumn && hasTimeColumn {
+			log.DefaultLogger.Debug("Assuming time series WIDE format", "columns", fmt.Sprintf("%v", rb.Columns()))
+			if frame, err = data.LongToWide(frame, nil); err != nil {
+				log.DefaultLogger.Error("Unable to convert frame from long to wide", "error", err)
+				return nil, err
+			}
+		}
+
 		frames = append(frames, frame)
 	}
 

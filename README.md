@@ -1,16 +1,59 @@
-# Grafana Data Source Backend Plugin Template
+# InfluxDB IOx Datasource Graafana plugin
 
-[![Build](https://github.com/grafana/grafana-starter-datasource-backend/workflows/CI/badge.svg)](https://github.com/grafana/grafana-datasource-backend/actions?query=workflow%3A%22CI%22)
+**Note**: this is currently an experimental proof-of-concept plugin.
 
-This template is a starting point for building Grafana Data Source Backend Plugins
+## What is it?
+This is a Grafana datasource backend plugin for querying an InfluxDB IOx server via its SQL frontend over Arrow Flight.
+Currently the plugin provides the ability to manage a connection to a database on IOx, via its gRPC API, and also to execute SQL queries against that database.
 
-## What is Grafana Data Source Backend Plugin?
+## How do I use it?
+The plugin is not currently signed so you will need to explicitly give Grafana permission to use it.
+To do that you need to either set the following in your `grafana.ini`
 
-Grafana supports a wide range of data sources, including Prometheus, MySQL, and even Datadog. There’s a good chance you can already visualize metrics from the systems you have set up. In some cases, though, you already have an in-house metrics solution that you’d like to add to your Grafana dashboards. Grafana Data Source Plugins enables integrating such solutions with Grafana.
+```ini
+[plugins]
+;enable_alpha = false
+;app_tls_skip_verify_insecure = false
+# Enter a comma-separated list of plugin identifiers to identify plugins that are allowed to be loaded even if they lack a valid signature.
+allow_loading_unsigned_plugins = influxdata-influxdb-iox-grafana
+;marketplace_url = https://grafana.com/grafana/plugins/
+```
 
-For more information about backend plugins, refer to the documentation on [Backend plugins](https://grafana.com/docs/grafana/latest/developers/plugins/backend/).
+or you will need to set the relevant environment variable:
 
-## Getting started
+```
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=influxdata-influxdb-iox-grafana
+```
+
+Oh, you will need the plugin of course! Grab the archive from the releases page on the repo.
+Unpack it an put it somewhere. 
+You will then need to tell Grafana where to look for the plugin, which you can do either by modifying the Grafana config in `grafana.ini`:
+
+```
+#################################### Paths ####################################
+[paths]
+# Path to where grafana can store temp files, sessions, and the sqlite3 db (if that is used)
+;data = /var/lib/grafana
+
+# Temporary files in `data` directory older than given duration will be removed
+;temp_data_lifetime = 24h
+
+# Directory where grafana can store logs
+;logs = /var/log/grafana
+
+# Directory where grafana will automatically scan and look for plugins
+plugins = /Users/me/grafana-dev/plugins/
+```
+
+or by using an env var:
+
+```
+GF_PATHS_PLUGINS=/Users/me/grafana-dev/plugins/
+```
+
+If that all works out then when you restart Grafana it should find it and you should be able to see it as an unsigned datasource.
+
+## Contributing
 
 A data source backend plugin consists of both frontend and backend components.
 
