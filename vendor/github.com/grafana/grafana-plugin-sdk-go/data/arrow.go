@@ -640,20 +640,25 @@ func parseColumn(col array.Interface, i int, nullable []bool, frame *Frame) erro
 	return nil
 }
 
-// FromArrowRecord converts a an Arrow record batch into a Frame.
-func FromArrowRecord(record array.Record) (*Frame, error) {
-	schema := record.Schema()
+func populateFrameFromSchema(schema *arrow.Schema, frame *Frame) error {
 	metaData := schema.Metadata()
-	frame := &Frame{}
 	frame.Name, _ = getMDKey("name", metaData) // No need to check ok, zero value ("") is returned
 	frame.RefID, _ = getMDKey("refId", metaData)
 
+	var err error
 	if metaAsString, ok := getMDKey("meta", metaData); ok {
-		var err error
 		frame.Meta, err = FrameMetaFromJSON(metaAsString)
-		if err != nil {
-			return nil, err
-		}
+	}
+
+	return err
+}
+
+// FromArrowRecord converts a an Arrow record batch into a Frame.
+func FromArrowRecord(record array.Record) (*Frame, error) {
+	schema := record.Schema()
+	frame := &Frame{}
+	if err := populateFrameFromSchema(schema, frame); err != nil {
+		return nil, err
 	}
 
 	nullable, err := initializeFrameFields(schema, frame)
@@ -678,17 +683,9 @@ func UnmarshalArrowFrame(b []byte) (*Frame, error) {
 	defer fR.Close()
 
 	schema := fR.Schema()
-	metaData := schema.Metadata()
 	frame := &Frame{}
-	frame.Name, _ = getMDKey("name", metaData) // No need to check ok, zero value ("") is returned
-	frame.RefID, _ = getMDKey("refId", metaData)
-
-	if metaAsString, ok := getMDKey("meta", metaData); ok {
-		var err error
-		frame.Meta, err = FrameMetaFromJSON(metaAsString)
-		if err != nil {
-			return nil, err
-		}
+	if err := populateFrameFromSchema(schema, frame); err != nil {
+		return nil, err
 	}
 
 	nullable, err := initializeFrameFields(schema, frame)
