@@ -11,3 +11,5 @@ require (
 	google.golang.org/grpc v1.37.1
 	google.golang.org/protobuf v1.27.1
 )
+
+replace github.com/grafana/grafana-plugin-sdk-go => github.com/e-dard/grafana-plugin-sdk-go v0.114.1-0.20211010131548-afb84c377f7c
