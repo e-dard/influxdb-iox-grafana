@@ -1,4 +1,4 @@
-# InfluxDB IOx Datasource Graafana plugin
+# InfluxDB IOx Datasource Grafana plugin
 
 **Note**: this is currently an experimental proof-of-concept plugin.
 
